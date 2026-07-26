@@ -1,25 +1,26 @@
-# RAMIS-Net: Multi-Modal Medical Image Segmentation
+<!-- 徽章区域（项目状态、版本、依赖等） -->
+<p align="center">
+  <img src="https://img.shields.io/badge/PyTorch-1.12%2B-EE4C2C?logo=pytorch&logoColor=white" alt="PyTorch">
+  <img src="https://img.shields.io/badge/Python-3.8%2B-3776AB?logo=python&logoColor=white" alt="Python">
+  <img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT">
+  <img src="https://img.shields.io/badge/Version-1.0-blue" alt="Version">
+  <img src="https://img.shields.io/badge/Status-Active-brightgreen" alt="Status">
+</p>
 
-A PyTorch implementation of RAMIS-Net for medical image segmentation with support for missing modalities. This network combines Mamba blocks with transformer-based attention mechanisms for robust segmentation of brain tumors in multi-modal MRI data.
+# 🧠 RAMIS-Net: Hierarchical collaborative distillation for brain tumor segmentation with incomplete modality
 
-## Overview
+> *A PyTorch implementation of RAMIS‑Net for medical image segmentation with support for missing modalities.*  
+> RAMIS‑Net improves brain tumor segmentation under incomplete MRI conditions, especially in the **TC** and **ET** regions, by hierarchically distilling complete modality knowledge into missing modality paths through **RARA**, **MISA**, and task‑level alignment.
 
-RAMIS-Net is designed to handle incomplete multi-modal medical imaging datasets by learning from both complete and incomplete modality combinations. The architecture leverages:
+---
 
-- **Mamba Blocks**: State-space models for efficient sequence processing
-- **Rotary Position Embedding (RoPE)**: For improved spatial encoding
-- **Multi-stage Encoder-Decoder**: With skip connections for fine-grained segmentation
-- **Linear Attention**: For efficient long-range dependencies
+## 📷 Overview
 
-## Features
+<img width="1015" height="619" alt="image" src="https://github.com/user-attachments/assets/02b99604-1879-40f7-9970-31418a740725" />
 
-- Support for multi-modal MRI data (FLAIR, T1, T1ce, T2)
-- Handles missing modalities gracefully
-- Modular architecture for easy customization
-- Training with BraTS 2018/2020 datasets
-- Comprehensive evaluation metrics (Dice, HD95)
+---
 
-## Project Structure
+## 📂 Project Structure
 
 ```
 RAMIS-Net/
@@ -45,26 +46,19 @@ RAMIS-Net/
 └── validate.py                # Validation script
 ```
 
-## Requirements
+---
 
-```
-torch>=1.13.0
-torchvision>=0.14.0
-numpy
-nibabel
-einops
-timm
-mamba-ssm
-monai
-scipy
-```
+## ⚙️ Installation & Dependencies
 
-Install dependencies:
+Install the required packages:
+
 ```bash
 pip install -r requirements.txt
 ```
 
-## Usage
+---
+
+## 🚀 Usage
 
 ### Training
 
@@ -83,14 +77,16 @@ python train.py \
 
 All training arguments are defined in `configs/args.py`. Key parameters:
 
-- `--task_name`: Project name (default: RAMIS-Net)
-- `--datasets`: Dataset type - 'BRATS 2018' or 'BRATS 2020'
-- `--path_to_data`: Path to dataset directory
-- `--n_epochs`: Number of training epochs (default: 300)
-- `--batch_size_tr`: Training batch size
-- `--batch_size_va`: Validation batch size
-- `--lr`: Learning rate (default: 0.00025)
-- `--modalities`: Input modalities (default: flair t1 t1ce t2)
+| Parameter | Description | Default |
+|-----------|-------------|---------|
+| `--task_name` | Project name | `RAMIS-Net` |
+| `--datasets` | Dataset type – `'BRATS 2018'` or `'BRATS 2020'` | – |
+| `--path_to_data` | Path to dataset directory | – |
+| `--n_epochs` | Number of training epochs | `300` |
+| `--batch_size_tr` | Training batch size | – |
+| `--batch_size_va` | Validation batch size | – |
+| `--lr` | Learning rate | `0.00025` |
+| `--modalities` | Input modalities | `flair t1 t1ce t2` |
 
 ### Evaluation
 
@@ -101,9 +97,12 @@ python validate.py \
     --path_to_data ./datasets/MICCAI_BraTS2020_TrainingData/
 ```
 
-## Data Format
+---
 
-Expected data directory structure:
+## 🗂️ Data Format
+
+Expected directory structure:
+
 ```
 MICCAI_BraTS2020_TrainingData/
 ├── BraTS20_Training_001/
@@ -116,68 +115,41 @@ MICCAI_BraTS2020_TrainingData/
 └── ...
 ```
 
-Labels in segmentation files:
-- 0: Background
-- 1: Necrotic/Non-enhancing tumor (NCR/NET)
-- 2: Peritumoral edema (ED)
-- 4: Enhancing tumor (ET)
+**Label mapping** in segmentation files:
 
-## Model Architecture
+- `0` – Background
+- `1` – Necrotic/Non‑enhancing tumor (NCR/NET)
+- `2` – Peritumoral edema (ED)
+- `4` – Enhancing tumor (ET)
 
-### Encoder
-- Multi-stage patch embedding with progressively increasing receptive fields
-- Combination of efficient transformers and Mamba blocks
-- Skip connections for feature preservation
+---
 
-### Decoder
-- Progressive upsampling with transformer-based refinement
-- Feature fusion from encoder skip connections
-- Final segmentation head with 4 output channels
+## 📊 Output
 
-## Training Details
+After training, the model saves the following files:
 
-- **Optimizer**: AdamW with weight decay 1e-5
-- **Scheduler**: Polynomial learning rate decay (power=0.75)
-- **Loss Function**: Weighted combination of:
-  - Dice loss (full + missing modality branches)
-  - Context alignment loss (RARA)
-  - Token consistency loss (MISA)
-  - Reconstruction loss
-  - Consistency loss between full and missing branches
+- `./new_results/RAMIS-Net/weights/model_weights.pth` – Latest checkpoint  
+- `./new_results/RAMIS-Net/weights/best_model_weights.pth` – Best validation model  
+- `./new_results/RAMIS-Net/[timestamp]_log.txt` – Training logs
 
-- **Input Size**: 128 × 160 × 192
-- **Random Seed**: 3407 (fixed for reproducibility)
+---
 
-## Output
+## 📄 License
 
-After training, the model saves:
-- `./new_results/RAMIS-Net/weights/model_weights.pth` - Latest checkpoint
-- `./new_results/RAMIS-Net/weights/best_model_weights.pth` - Best validation model
-- `./new_results/RAMIS-Net/[timestamp]_log.txt` - Training logs
+This project is open source and available under the **MIT License**.
 
-## Citation
+---
 
-If you use RAMIS-Net in your research, please cite this work:
-
-```bibtex
-@article{ramis-net,
-  title={RAMIS-Net: Medical Image Segmentation with Handling Missing Modalities},
-  year={2026}
-}
-```
-
-## License
-
-This project is open source and available under the MIT License.
-
-## Acknowledgments
+## 🤝 Acknowledgments
 
 - Built with [PyTorch](https://pytorch.org/)
-- Uses [Mamba](https://github.com/state-spaces/mamba) state-space models
-- Inspired by [timm](https://github.com/rwightman/pytorch-image-models) library
+- Uses [Mamba](https://github.com/state-spaces/mamba) state‑space models
+- Inspired by the [timm](https://github.com/rwightman/pytorch-image-models) library
 - [MONAI](https://monai.io/) for medical imaging utilities
 
-## Support
+---
+
+## 📬 Support
 
 For issues and questions, please refer to the project documentation or contact the authors.
 
