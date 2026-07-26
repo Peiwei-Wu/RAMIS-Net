@@ -40,7 +40,7 @@ def get_args():
 
     # Training parameters
     parser.add_argument('--n_epochs', type=int, default=300, help='number of epochs')
-    parser.add_argument('--lr', type=float, default=0.00025, help='learning rate')
+    parser.add_argument('--lr', type=float, default=0.0003, help='learning rate')
     parser.add_argument('--weight_decay', type=float, default=1e-5, help='weight decay')
     parser.add_argument('--power', type=float, default=0.75, help='polynomial decay power')
 
