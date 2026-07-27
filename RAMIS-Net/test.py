@@ -57,8 +57,10 @@ args.modalities = ['flair', 't1', 't1ce', 't2']
 loaders = make_data_loaders(args)
 train_loader = loaders['train']
 eval_loader = loaders['eval']
+test_loader = loaders['test']
 
 torch.backends.cudnn.enabled = False
+
 
 def build_model(inp_shape, num_classes, missing_in_chans):
     return RAMISNet(
@@ -93,7 +95,8 @@ model_missing = model_missing.to(device)
 
 loaders = {
     'train': train_loader,
-    'eval': eval_loader
+    'eval': eval_loader,
+    'test': test_loader
 }
 
 # Initialize dice and HD95 metrics
@@ -108,7 +111,7 @@ val_loss_et_HD95 = 0
 val_loss_ct_HD95 = 0
 
 # Main evaluation loop
-for phase in ['eval']:
+for phase in ['test']:
     loader = loaders[phase]
     batch_count = 0
     for batch_id, (batch_x, batch_y) in enumerate(loader):

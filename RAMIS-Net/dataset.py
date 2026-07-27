@@ -109,26 +109,31 @@ class BraTS(Dataset):
         return x_normalized
 
 
-def split_dataset(data_root, test_p, datasets_type):
+def split_dataset(data_root, validation_p, test_p, datasets_type, seed=42):
     if datasets_type == 'BRATS 2018':
         patients_dir = glob.glob(os.path.join(data_root, "*GG", "Brats18*"))
-        patients_dir.sort()
-        N = int(len(patients_dir) * test_p)
-        train_patients_list = patients_dir[N:]
-        val_patients_list = patients_dir[:N]
-        return train_patients_list, val_patients_list
-
     elif datasets_type == 'BRATS 2020':
         patients_dir = glob.glob(os.path.join(data_root, "BraTS20*"))
-        patients_dir.sort()
-        N = int(len(patients_dir) * test_p)
-        train_patients_list = patients_dir[N:]
-        val_patients_list = patients_dir[:N]
-        return train_patients_list, val_patients_list
+    else:
+        raise ValueError(f"Unknown dataset type: {datasets_type}")
+
+    random.seed(seed)
+    np.random.seed(seed)
+    random.shuffle(patients_dir)
+
+    N_test = int(len(patients_dir) * test_p)
+    N_val = int(len(patients_dir) * validation_p)
+
+    # Split dataset: test | val | train
+    test_patients_list = patients_dir[:N_test]
+    val_patients_list = patients_dir[N_test:N_test + N_val]
+    train_patients_list = patients_dir[N_test + N_val:]
+
+    return train_patients_list, val_patients_list, test_patients_list
 
 
 def make_data_loaders(config):
-    train_list, val_list = split_dataset(config.path_to_data, float(config.test_p), config.datasets)
+    train_list, val_list, test_list = split_dataset(config.path_to_data, float(config.validation_p), float(config.test_p), config.datasets)
     crop_size = np.zeros((3))
     crop_size[0] = config.inputshape[0]
     crop_size[1] = config.inputshape[1]
@@ -138,6 +143,7 @@ def make_data_loaders(config):
 
     train_ds = BraTS(train_list, crop_size=crop_size, modes=config.modalities, train=True,  normalization = True)
     val_ds   = BraTS(val_list,   crop_size=crop_size, modes=config.modalities, train=False, normalization = True)
+    test_ds  = BraTS(test_list,  crop_size=crop_size, modes=config.modalities, train=False, normalization = True)
 
     loaders = {}
     loaders['train'] = DataLoader(train_ds, batch_size=int(config.batch_size_tr),
@@ -148,5 +154,9 @@ def make_data_loaders(config):
                                   num_workers=4,
                                   pin_memory=True,
                                   shuffle=False)
+    loaders['test'] = DataLoader(test_ds, batch_size=int(config.batch_size_tr),
+                                  num_workers=4,
+                                  pin_memory=True,
+                                  shuffle=True)
     
     return loaders
