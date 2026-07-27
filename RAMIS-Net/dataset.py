@@ -52,7 +52,6 @@ class BraTS(Dataset):
         return (torch.tensor(volume.copy(), dtype=torch.float),
                 torch.tensor(seg_volume.copy(), dtype=torch.float))
 
-
     def aug_sample(self, volumes, mask):
         """Prepare batch (N, H, W, D) -> (channel, h, w, d)"""
         x = np.stack(volumes, axis=0)
@@ -98,7 +97,6 @@ class BraTS(Dataset):
 
     def normlize(self, x):
         return (x - x.min()) / (x.max() - x.min())
-
 
     def normlize_brain(self, x, epsilon=1e-8):
         average        = x[np.nonzero(x)].mean()
@@ -157,6 +155,6 @@ def make_data_loaders(config):
     loaders['test'] = DataLoader(test_ds, batch_size=int(config.batch_size_tr),
                                   num_workers=4,
                                   pin_memory=True,
-                                  shuffle=True)
+                                  shuffle=False)
     
     return loaders
