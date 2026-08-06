@@ -107,7 +107,14 @@ class BraTS(Dataset):
         return x_normalized
 
 
-def split_dataset(data_root, validation_p, test_p, datasets_type, seed=42):
+# Fixed train/val/test split sizes following the paper's protocol
+DATASET_SPLITS = {
+    'BRATS 2018': {'train': 199, 'val': 29, 'test': 57},
+    'BRATS 2020': {'train': 219, 'val': 50, 'test': 100},
+}
+
+
+def split_dataset(data_root, datasets_type, seed=43):
     if datasets_type == 'BRATS 2018':
         patients_dir = glob.glob(os.path.join(data_root, "*GG", "Brats18*"))
     elif datasets_type == 'BRATS 2020':
@@ -119,19 +126,24 @@ def split_dataset(data_root, validation_p, test_p, datasets_type, seed=42):
     np.random.seed(seed)
     random.shuffle(patients_dir)
 
-    N_test = int(len(patients_dir) * test_p)
-    N_val = int(len(patients_dir) * validation_p)
+    splits = DATASET_SPLITS[datasets_type]
+    N_train, N_val, N_test = splits['train'], splits['val'], splits['test']
+
+    if N_train + N_val + N_test > len(patients_dir):
+        raise ValueError(
+            f"Split sizes ({N_train}+{N_val}+{N_test}={N_train + N_val + N_test}) "
+            f"exceed available cases ({len(patients_dir)}) for {datasets_type}")
 
     # Split dataset: test | val | train
     test_patients_list = patients_dir[:N_test]
     val_patients_list = patients_dir[N_test:N_test + N_val]
-    train_patients_list = patients_dir[N_test + N_val:]
+    train_patients_list = patients_dir[N_test + N_val:N_test + N_val + N_train]
 
     return train_patients_list, val_patients_list, test_patients_list
 
 
 def make_data_loaders(config):
-    train_list, val_list, test_list = split_dataset(config.path_to_data, float(config.validation_p), float(config.test_p), config.datasets)
+    train_list, val_list, test_list = split_dataset(config.path_to_data, config.datasets)
     crop_size = np.zeros((3))
     crop_size[0] = config.inputshape[0]
     crop_size[1] = config.inputshape[1]

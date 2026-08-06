@@ -35,12 +35,8 @@ parser.add_argument('--batch_size_tr', type=int, default=1,
                     help='batch size for train')
 parser.add_argument('--batch_size_va', type=int, default=1,
                     help='batch size for validation')
-parser.add_argument('--test_p', type=float, default=0.2,
-                    help='test percentage (20%)')
 parser.add_argument('--progress_p', type=float, default=0.1,
                     help='progress report frequency')
-parser.add_argument('--validation_p', type=float, default=0.1,
-                    help='validation percentage')
 parser.add_argument('--inputshape', default=[160, 192, 128],
                     help='input shape')
 
@@ -81,6 +77,24 @@ def load_model(model_missing, saved_model_path):
     return model_missing
 
 
+class RunningAverages:
+    """Track independent running means for evaluation metrics."""
+
+    def __init__(self):
+        self.totals = {}
+        self.counts = {}
+
+    def update(self, **values):
+        for metric_name, metric_value in values.items():
+            self.totals[metric_name] = self.totals.get(metric_name, 0.0) + metric_value
+            self.counts[metric_name] = self.counts.get(metric_name, 0) + 1
+
+    def mean(self, metric_name):
+        if metric_name not in self.totals:
+            raise KeyError(f"Metric '{metric_name}' has not been updated.")
+        return self.totals[metric_name] / self.counts[metric_name]
+
+
 model_missing = build_model(
     args.inputshape,
     args.number_classes,
@@ -99,16 +113,8 @@ loaders = {
     'test': test_loader
 }
 
-# Initialize dice and HD95 metrics
-val_scores_miss_Dice = 0
-val_loss_wt_Dice = 0
-val_loss_et_Dice = 0
-val_loss_ct_Dice = 0
-
-val_scores_miss_HD95 = 0
-val_loss_wt_HD95 = 0
-val_loss_et_HD95 = 0
-val_loss_ct_HD95 = 0
+# Running Dice and HD95 metrics.
+test_metrics = RunningAverages()
 
 # Main evaluation loop
 for phase in ['test']:
@@ -154,26 +160,28 @@ for phase in ['test']:
             val_dice_miss, val_wt_miss, val_et_miss, val_ct_miss = measure_dice_score(pred, batch_y, thresh=[0.5, 0.5, 0.5], wt_j=3, ct_j=2, et_j=None)
             val_hd95_miss, hd95_WT, hd95_TC, hd95_ET = np.array(cal_hd95(pred, batch_y, thresh=[0.5, 0.5, 0.5], wt_j=3, ct_j=2, et_j=None))
 
-            # Dice
-            val_scores_miss_Dice += val_dice_miss
-            val_loss_wt_Dice += val_wt_miss
-            val_loss_et_Dice += val_et_miss
-            val_loss_ct_Dice += val_ct_miss
-            dice_missing_1 = (val_scores_miss_Dice/(batch_id+1))
-            dice_wt_1 = (val_loss_wt_Dice/(batch_id+1))
-            dice_et_1 = (val_loss_et_Dice/(batch_id+1))
-            dice_ct_1 = (val_loss_ct_Dice/(batch_id+1))
+            test_metrics.update(
+                dice_missing=val_dice_miss,
+                dice_wt=val_wt_miss,
+                dice_tc=val_ct_miss,
+                dice_et=val_et_miss,
+                hd95_missing=val_hd95_miss,
+                hd95_wt=hd95_WT,
+                hd95_tc=hd95_TC,
+                hd95_et=hd95_ET,
+            )
 
-            # HD95
-            val_scores_miss_HD95 += val_hd95_miss
-            val_loss_wt_HD95 += hd95_WT
-            val_loss_et_HD95 += hd95_ET
-            val_loss_ct_HD95 += hd95_TC
-            HD95_missing_1 = (val_scores_miss_HD95 / (batch_id + 1))
-            HD95_wt_1 = (val_loss_wt_HD95 / (batch_id + 1))
-            HD95_et_1 = (val_loss_et_HD95 / (batch_id + 1))
-            HD95_ct_1 = (val_loss_ct_HD95 / (batch_id + 1))
+    if args.generate_seg_figure != 'store_true':
+        dice_missing = test_metrics.mean('dice_missing')
+        dice_wt = test_metrics.mean('dice_wt')
+        dice_tc = test_metrics.mean('dice_tc')
+        dice_et = test_metrics.mean('dice_et')
+        hd95_missing = test_metrics.mean('hd95_missing')
+        hd95_wt = test_metrics.mean('hd95_wt')
+        hd95_tc = test_metrics.mean('hd95_tc')
+        hd95_et = test_metrics.mean('hd95_et')
 
     print(f'✓ Completed {batch_count} batches')
-    print(f'### Val DSC  missing: {dice_missing_1}, WT: {dice_wt_1}, CT: {dice_ct_1}, ET: {dice_et_1}')
-    print(f'### Val HD95 missing: {HD95_missing_1}, WT: {HD95_wt_1}, CT: {HD95_ct_1}, ET: {HD95_et_1}')
+    if args.generate_seg_figure != 'store_true':
+        print(f'### Val DSC  missing: {dice_missing}, WT: {dice_wt}, TC: {dice_tc}, ET: {dice_et}')
+        print(f'### Val HD95 missing: {hd95_missing}, WT: {hd95_wt}, TC: {hd95_tc}, ET: {hd95_et}')

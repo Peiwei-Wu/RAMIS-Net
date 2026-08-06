@@ -37,7 +37,7 @@ class My_DWConv(nn.Module):
 
 
 class SELayer(nn.Module):
-    """Squeeze-and-Excitation layer for 3D."""
+    """Generate adaptive weights for Mamba and residual feature fusion."""
     def __init__(self, channel):
         super(SELayer, self).__init__()
         self.avg_pool = nn.AdaptiveAvgPool3d(1)
@@ -54,11 +54,11 @@ class SELayer(nn.Module):
         input: B C/2 d h w
         output: tuple of 2 tensors
         """
-        b, c, _, _, _ = x.size()
-        y = self.avg_pool(x).view(b, c)  # B C/2
-        y = self.fc2(y).view(b, c, 1, 1, 1)
-        y = torch.chunk(y, chunks=2, dim=1)
-        return y
+        batch_size, channels, _, _, _ = x.size()
+        fusion_weights = self.avg_pool(x).view(batch_size, channels)
+        fusion_weights = self.fc2(fusion_weights).view(batch_size, channels, 1, 1, 1)
+        mamba_weight, residual_weight = torch.chunk(fusion_weights, chunks=2, dim=1)
+        return mamba_weight, residual_weight
 
 
 class DWConv(nn.Module):

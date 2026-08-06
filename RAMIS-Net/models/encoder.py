@@ -11,9 +11,9 @@ from .linear_former import RoPE, GateLinearAttentionNoSilu
 
 class EfficientTransformerBlock3D(nn.Module):
     """
-    Efficient 3D Transformer block.
-    input:  B, D, H, W, C
-    Output: B, D, H, W, C
+    Encoder block used by RARA or MISA.
+
+    Input/Output: (batch, depth, height, width, channels).
     """
 
     def __init__(self, in_dim, key_dim, value_dim, head_count=1, token_mlp='mix_skip', recon_mode=False,
@@ -46,36 +46,40 @@ class EfficientTransformerBlock3D(nn.Module):
             self.mlp = MLP_FFN(in_dim, int(in_dim * 4))
 
     def forward(self, x: torch.Tensor, D, H, W, CLS=None, state="train") -> torch.Tensor:
-        shortcut = x # b d h w d
+        residual = x
         x = Rearrange('b d h w c -> b c d h w', d=D, h=H, w=W)(x)
         if self.isLF:
             x = x + self.pos(x)
-        norm_1 = self.norm1(Rearrange('b c d h w -> b d h w c', d=D, h=H, w=W)(x))
-        norm_1 = Rearrange('b d h w c -> b c d h w', d=D, h=H, w=W)(norm_1)
+        normalized_features = self.norm1(Rearrange('b c d h w -> b d h w c', d=D, h=H, w=W)(x))
+        normalized_features = Rearrange('b d h w c -> b c d h w', d=D, h=H, w=W)(normalized_features)
 
         if CLS is not None:
-            attn, context, CLS = self.attn(norm_1, CLS=CLS)
+            attention_features, relational_context, CLS = self.attn(normalized_features, CLS=CLS)
         else:
             if self.isLF:
-                # Rotational position encoding
+                # RALA produces rank-enriched attention features and the REC matrix.
                 sin, cos = self.rope((D, H, W))
                 if self.isDrop_path:
-                    attn, context = self.drop_path(self.attn(norm_1, sin, cos))
+                    attention_features, relational_context = self.drop_path(
+                        self.attn(normalized_features, sin, cos)
+                    )
                 else:
-                    attn, context = self.attn(norm_1, sin, cos)
+                    attention_features, relational_context = self.attn(normalized_features, sin, cos)
                 if self.layerscale:
-                    attn = self.gamma_1 * attn
+                    attention_features = self.gamma_1 * attention_features
             else:
-                attn, context = self.attn(norm_1, CLS=CLS)
-        attn = Rearrange('b c d h w -> b d h w c')(attn)
+                attention_features, relational_context = self.attn(normalized_features, CLS=CLS)
+        attention_features = Rearrange('b c d h w -> b d h w c')(attention_features)
 
-        tx = shortcut + attn
-        tx = Rearrange('b d h w c -> b (d h w) c')(tx)
+        attention_residual = residual + attention_features
+        attention_residual = Rearrange('b d h w c -> b (d h w) c')(attention_residual)
 
-        mx = tx + self.mlp(self.norm2(tx), D, H, W)
-        mx = Rearrange('b (d h w) c -> b d h w c', d=D, h=H, w=W)(mx)
+        block_output = attention_residual + self.mlp(
+            self.norm2(attention_residual), D, H, W
+        )
+        block_output = Rearrange('b (d h w) c -> b d h w c', d=D, h=H, w=W)(block_output)
 
-        return mx, context, CLS
+        return block_output, relational_context, CLS
 
 
 class Encoder(nn.Module):
@@ -124,44 +128,46 @@ class Encoder(nn.Module):
         trunc_normal_(self.cls_token, std=.02)
 
     def forward(self, x: torch.Tensor, state="train") -> torch.Tensor:
-        B = x.shape[0]
-        outs = []
-        context_att = []
+        batch_size = x.shape[0]
+        multi_scale_features = []
+        rank_enriched_contexts = []
 
         # stage 1
         x, D, H, W = self.patch_embed1(x)
-        x, context, _ = self.block1(x, D, H, W, state=state)
-        context_att.append(context)
-        x, context, _ = self.block1_2(x, D, H, W, state=state)
-        context_att.append(context)
+        x, rank_enriched_context, _ = self.block1(x, D, H, W, state=state)
+        rank_enriched_contexts.append(rank_enriched_context)
+        x, rank_enriched_context, _ = self.block1_2(x, D, H, W, state=state)
+        rank_enriched_contexts.append(rank_enriched_context)
         x = Rearrange('b d h w c -> b c d h w')(x)
         x = self.mamba1(x, D, H, W, state=state)
         x = Rearrange('b c d h w -> b d h w c')(x)
         x = self.norm1(x)
-        outs.append(x)
+        multi_scale_features.append(x)
 
         # stage 2
         x = Rearrange('b d h w c -> b c d h w')(x)
         x, D, H, W = self.patch_embed2(x)
-        x, context, _ = self.block2(x, D, H, W, state=state)
-        context_att.append(context)
-        x, context, _ = self.block2_2(x, D, H, W, state=state)
-        context_att.append(context)
+        x, rank_enriched_context, _ = self.block2(x, D, H, W, state=state)
+        rank_enriched_contexts.append(rank_enriched_context)
+        x, rank_enriched_context, _ = self.block2_2(x, D, H, W, state=state)
+        rank_enriched_contexts.append(rank_enriched_context)
         x = Rearrange('b d h w c -> b c d h w')(x)
         x = self.mamba2(x, D, H, W, state=state)
         x = Rearrange('b c d h w -> b d h w c')(x)
         x = self.norm2(x)
-        outs.append(x)
+        multi_scale_features.append(x)
 
         # stage 3
         x = Rearrange('b d h w c -> b c d h w')(x)
         x, D, H, W = self.patch_embed3(x)
-        # token loss
-        cls_tokens = self.cls_token.expand(B, -1, -1)
+        # MISA modality-semantic vectors.
+        modality_semantic_vectors = self.cls_token.expand(batch_size, -1, -1)
         for blk in self.block3:
-            x, context, cls_tokens = blk(x, D, H, W, cls_tokens, state=state)
+            x, relational_context, modality_semantic_vectors = blk(
+                x, D, H, W, modality_semantic_vectors, state=state
+            )
         x = self.norm3(x)
         x = Rearrange('b d h w c -> b (d h w) c')(x)
-        outs.append(x)
+        multi_scale_features.append(x)
 
-        return outs, context_att, cls_tokens
+        return multi_scale_features, rank_enriched_contexts, modality_semantic_vectors

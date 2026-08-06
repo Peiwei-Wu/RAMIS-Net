@@ -1,4 +1,5 @@
 <!-- 徽章区域（项目状态、版本、依赖等） -->
+
 <p align="center">
   <img src="https://img.shields.io/badge/PyTorch-1.12%2B-EE4C2C?logo=pytorch&logoColor=white" alt="PyTorch">
   <img src="https://img.shields.io/badge/Python-3.8%2B-3776AB?logo=python&logoColor=white" alt="Python">
@@ -16,7 +17,7 @@
 
 ## 📷 Overview
 
-<img width="1015" height="619" alt="image" src="https://github.com/user-attachments/assets/02b99604-1879-40f7-9970-31418a740725" />
+![image-20260806183719326](C:\Users\35575\AppData\Roaming\Typora\typora-user-images\image-20260806183719326.png)
 
 ---
 
@@ -36,14 +37,14 @@ RAMIS-Net/
 │   ├── linear_former.py        # RoPE and attention mechanisms
 │   └── ramis_net.py            # Main model
 ├── functions/
-│   ├── adamw.py               # AdamW optimizer
-│   └── DropPath.py            # Stochastic depth
+│   ├── adamw.py                # AdamW optimizer
+│   └── DropPath.py             # Stochastic depth
 ├── train.py                    # Training script
 ├── dataset.py                  # Data loading and preprocessing
 ├── losses.py                   # Loss functions
 ├── utils.py                    # Utility functions
-├── eval_utils.py              # Evaluation metrics
-└── validate.py                # Validation script
+├── eval_utils.py               # Evaluation metrics
+└── validate.py                 # Validation script
 ```
 
 ---

@@ -7,7 +7,7 @@ from .base_modules import SELayer
 
 
 class MambaLayer(nn.Module):
-    """Mamba layer with SE attention and skip connections."""
+    """Hierarchical Mamba layer with four channel subscales and adaptive residual fusion."""
     def __init__(self, input_dim, output_dim, d_state=16, d_conv=4, expand=2):
         super().__init__()
         self.input_dim = input_dim
@@ -25,73 +25,97 @@ class MambaLayer(nn.Module):
 
     def forward(self, x):
         """
-        input:  b c d h w
-        output: b c' d h w
+        Input:  (batch, channels, depth, height, width)
+        Output: (batch, output_channels, depth, height, width)
         """
         if x.dtype == torch.float16:
             x = x.type(torch.float32)
-        B, C = x.shape[:2]
-        assert C == self.input_dim
-        n_tokens = x.shape[2:].numel()
-        img_dims = x.shape[2:]
-        x_flat = x.reshape(B, C, n_tokens).transpose(-1, -2)
-        x_norm = self.norm(x_flat)
-        x1, x2, x3, x4 = torch.chunk(x_norm, 4, dim=2)
+        batch_size, channels = x.shape[:2]
+        assert channels == self.input_dim
+        num_tokens = x.shape[2:].numel()
+        spatial_shape = x.shape[2:]
+        token_sequence = x.reshape(batch_size, channels, num_tokens).transpose(-1, -2)
+        normalized_tokens = self.norm(token_sequence)
+        subscale_1, subscale_2, subscale_3, subscale_4 = torch.chunk(normalized_tokens, 4, dim=2)
 
-        # Process chunk 1
-        M1 = self.mamba(x1)  # B L C/4
-        M2 = self.skip_scale * x1  # B L C/4
-        M1 = M1.transpose(-1, -2).reshape(B, self.input_dim // 4, *img_dims)
-        M2 = M2.transpose(-1, -2).reshape(B, self.input_dim // 4, *img_dims)
-        M = torch.cat([M1, M2], dim=1)  # B C/2 d h w
-        M = self.se(M)
-        M1 = M[0] * M1
-        M2 = M[1] * M2
-        x_mamba1 = M1 + M2
-        x_mamba1 = x_mamba1.reshape(B, C // 4, n_tokens).transpose(-1, -2)
+        # Subscale 1: adaptively fuse the Mamba and residual features.
+        mamba_feature = self.mamba(subscale_1)
+        residual_feature = self.skip_scale * subscale_1
+        mamba_feature = mamba_feature.transpose(-1, -2).reshape(
+            batch_size, self.input_dim // 4, *spatial_shape
+        )
+        residual_feature = residual_feature.transpose(-1, -2).reshape(
+            batch_size, self.input_dim // 4, *spatial_shape
+        )
+        fusion_weights = self.se(torch.cat([mamba_feature, residual_feature], dim=1))
+        mamba_feature = fusion_weights[0] * mamba_feature
+        residual_feature = fusion_weights[1] * residual_feature
+        subscale_output_1 = mamba_feature + residual_feature
+        subscale_output_1 = subscale_output_1.reshape(
+            batch_size, channels // 4, num_tokens
+        ).transpose(-1, -2)
 
-        # Process chunk 2
-        M1 = self.mamba(x2)
-        M2 = self.skip_scale * x2
-        M1 = M1.transpose(-1, -2).reshape(B, self.input_dim // 4, *img_dims)
-        M2 = M2.transpose(-1, -2).reshape(B, self.input_dim // 4, *img_dims)
-        M = torch.cat([M1, M2], dim=1)
-        M = self.se(M)
-        M1 = M[0] * M1
-        M2 = M[1] * M2
-        x_mamba2 = M1 + M2
-        x_mamba2 = x_mamba2.reshape(B, C // 4, n_tokens).transpose(-1, -2)
+        # Subscale 2.
+        mamba_feature = self.mamba(subscale_2)
+        residual_feature = self.skip_scale * subscale_2
+        mamba_feature = mamba_feature.transpose(-1, -2).reshape(
+            batch_size, self.input_dim // 4, *spatial_shape
+        )
+        residual_feature = residual_feature.transpose(-1, -2).reshape(
+            batch_size, self.input_dim // 4, *spatial_shape
+        )
+        fusion_weights = self.se(torch.cat([mamba_feature, residual_feature], dim=1))
+        mamba_feature = fusion_weights[0] * mamba_feature
+        residual_feature = fusion_weights[1] * residual_feature
+        subscale_output_2 = mamba_feature + residual_feature
+        subscale_output_2 = subscale_output_2.reshape(
+            batch_size, channels // 4, num_tokens
+        ).transpose(-1, -2)
 
-        # Process chunk 3
-        M1 = self.mamba(x3)
-        M2 = self.skip_scale * x3
-        M1 = M1.transpose(-1, -2).reshape(B, self.input_dim // 4, *img_dims)
-        M2 = M2.transpose(-1, -2).reshape(B, self.input_dim // 4, *img_dims)
-        M = torch.cat([M1, M2], dim=1)
-        M = self.se(M)
-        M1 = M[0] * M1
-        M2 = M[1] * M2
-        x_mamba3 = M1 + M2
-        x_mamba3 = x_mamba3.reshape(B, C // 4, n_tokens).transpose(-1, -2)
+        # Subscale 3.
+        mamba_feature = self.mamba(subscale_3)
+        residual_feature = self.skip_scale * subscale_3
+        mamba_feature = mamba_feature.transpose(-1, -2).reshape(
+            batch_size, self.input_dim // 4, *spatial_shape
+        )
+        residual_feature = residual_feature.transpose(-1, -2).reshape(
+            batch_size, self.input_dim // 4, *spatial_shape
+        )
+        fusion_weights = self.se(torch.cat([mamba_feature, residual_feature], dim=1))
+        mamba_feature = fusion_weights[0] * mamba_feature
+        residual_feature = fusion_weights[1] * residual_feature
+        subscale_output_3 = mamba_feature + residual_feature
+        subscale_output_3 = subscale_output_3.reshape(
+            batch_size, channels // 4, num_tokens
+        ).transpose(-1, -2)
 
-        # Process chunk 4
-        M1 = self.mamba(x4)
-        M2 = self.skip_scale * x4
-        M1 = M1.transpose(-1, -2).reshape(B, self.input_dim // 4, *img_dims)
-        M2 = M2.transpose(-1, -2).reshape(B, self.input_dim // 4, *img_dims)
-        M = torch.cat([M1, M2], dim=1)
-        M = self.se(M)
-        M1 = M[0] * M1
-        M2 = M[1] * M2
-        x_mamba4 = M1 + M2
-        x_mamba4 = x_mamba4.reshape(B, C // 4, n_tokens).transpose(-1, -2)
+        # Subscale 4.
+        mamba_feature = self.mamba(subscale_4)
+        residual_feature = self.skip_scale * subscale_4
+        mamba_feature = mamba_feature.transpose(-1, -2).reshape(
+            batch_size, self.input_dim // 4, *spatial_shape
+        )
+        residual_feature = residual_feature.transpose(-1, -2).reshape(
+            batch_size, self.input_dim // 4, *spatial_shape
+        )
+        fusion_weights = self.se(torch.cat([mamba_feature, residual_feature], dim=1))
+        mamba_feature = fusion_weights[0] * mamba_feature
+        residual_feature = fusion_weights[1] * residual_feature
+        subscale_output_4 = mamba_feature + residual_feature
+        subscale_output_4 = subscale_output_4.reshape(
+            batch_size, channels // 4, num_tokens
+        ).transpose(-1, -2)
 
-        x_mamba = torch.cat([x_mamba1, x_mamba2, x_mamba3, x_mamba4], dim=2)
-        x_mamba = self.norm(x_mamba)
-        x_mamba = self.proj(x_mamba)
-        out = x_mamba.transpose(-1, -2).reshape(B, self.output_dim, *img_dims)
-
-        return out
+        fused_subscale_features = torch.cat(
+            [subscale_output_1, subscale_output_2, subscale_output_3, subscale_output_4],
+            dim=2,
+        )
+        fused_subscale_features = self.norm(fused_subscale_features)
+        fused_subscale_features = self.proj(fused_subscale_features)
+        output = fused_subscale_features.transpose(-1, -2).reshape(
+            batch_size, self.output_dim, *spatial_shape
+        )
+        return output
 
 
 def get_mamba_layer(
@@ -108,7 +132,7 @@ def get_mamba_layer(
 
 
 class ResMambaBlock(nn.Module):
-    """Residual Mamba block with MLPs."""
+    """Hierarchical Residual Mamba (HRMamba) block used in RARA."""
     def __init__(
             self,
             spatial_dims: int,
@@ -150,12 +174,12 @@ class ResMambaBlock(nn.Module):
         x = x + self.mlp1(self.mlp_norm1(x), D, H, W, state=state)
         x = Rearrange('b (d h w) c -> b c d h w', d=D, h=H, w=W)(x)
 
-        x_init = x
-        x = self.mamba2(x)
-        x = x + x_init
-        x = Rearrange('b c d h w -> b (d h w) c')(x)
-        x = x + self.mlp2(self.mlp_norm2(x), D, H, W, state=state)
-        x = Rearrange('b (d h w) c -> b c d h w', d=D, h=H, w=W)(x)
+        # x_init = x
+        # x = self.mamba2(x)
+        # x = x + x_init
+        # x = Rearrange('b c d h w -> b (d h w) c')(x)
+        # x = x + self.mlp2(self.mlp_norm2(x), D, H, W, state=state)
+        # x = Rearrange('b (d h w) c -> b c d h w', d=D, h=H, w=W)(x)
 
         if self.DownSample:
             return x  # b c d h w

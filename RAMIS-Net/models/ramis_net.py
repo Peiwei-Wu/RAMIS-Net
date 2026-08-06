@@ -47,25 +47,33 @@ class RAMISNet(nn.Module):
             self.cls_projection = nn.Linear(in_out_chan[2][-1], in_out_chan[0][-1])
 
     def forward(self, x, state="train"):
-
-        enc_out, enc_context_att, CLS = self.enc(x, state=state)
-        CLS = CLS.permute(0, 2, 1)
+        encoder_features, rank_enriched_contexts, modality_semantic_vectors = self.enc(x, state=state)
+        modality_semantic_vectors = modality_semantic_vectors.permute(0, 2, 1)
 
         # Decode stage 2
-        tmp_2 = self.decoder_2(enc_out[2], first=True)
+        decoder_stage_2 = self.decoder_2(encoder_features[2], first=True)
 
         # Decode stage 1
-        tmp_1 = self.decoder_1(tmp_2, enc_out[1], first=False)
+        decoder_stage_1 = self.decoder_1(decoder_stage_2, encoder_features[1], first=False)
 
         # Decode stage 0
-        tmp_seg = self.decoder_0(tmp_1, enc_out[0], first=False)
-
-        uout = torch.sigmoid(tmp_seg)
+        segmentation_logits = self.decoder_0(decoder_stage_1, encoder_features[0], first=False)
+        segmentation_output = torch.sigmoid(segmentation_logits)
 
         # Reconstruction stage (if model_mode is 'full')
         if self.model_mode == 'full':
-            proj_CLS = self.cls_projection(CLS).permute(0, 2, 1)
-            tmp_recon = self.decoder_recon(tmp_1, enc_out[0], first=False, CLS=proj_CLS)
-            return uout, enc_context_att, CLS, tmp_recon
+            projected_semantic_vectors = self.cls_projection(modality_semantic_vectors).permute(0, 2, 1)
+            reconstructed_modalities = self.decoder_recon(
+                decoder_stage_1,
+                encoder_features[0],
+                first=False,
+                CLS=projected_semantic_vectors,
+            )
+            return (
+                segmentation_output,
+                rank_enriched_contexts,
+                modality_semantic_vectors,
+                reconstructed_modalities,
+            )
 
-        return uout, enc_context_att, CLS, []
+        return segmentation_output, rank_enriched_contexts, modality_semantic_vectors, []

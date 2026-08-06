@@ -115,28 +115,44 @@ class MyDecoderLayer(nn.Module):
     def forward(self, x1, x2=None, first=False, CLS=None):
 
         if first:
-            out = self.layer_up(x1)
+            decoder_output = self.layer_up(x1)
         else:
-            b, d, h, w, c = x2.shape
+            batch_size, depth, height, width, channels = x2.shape
 
-            cat_x = torch.cat([x1, x2], dim=-1)
-            cat_x = cat_x.view(b, -1, cat_x.shape[-1])
-            cat_linear_x = self.concat_linear(cat_x)
-            cat_linear_x = Rearrange('b (d h w) c -> b d h w c', b=b, h=h, w=w)(cat_linear_x)
+            skip_fused_features = torch.cat([x1, x2], dim=-1)
+            skip_fused_features = skip_fused_features.view(
+                batch_size, -1, skip_fused_features.shape[-1]
+            )
+            projected_features = self.concat_linear(skip_fused_features)
+            projected_features = Rearrange(
+                'b (d h w) c -> b d h w c',
+                b=batch_size,
+                h=height,
+                w=width,
+            )(projected_features)
 
             if self.recon_mode == False:
-                cat_linear_x, _, _ = self.layer_former_1(cat_linear_x, d, h, w, CLS=CLS)
-            tran_layer_2, _, _ = self.layer_former_2(cat_linear_x, d, h, w, CLS=CLS)
-            tran_layer_2 = Rearrange('b d h w c -> b (d h w) c')(tran_layer_2)
+                projected_features, _, _ = self.layer_former_1(
+                    projected_features, depth, height, width, CLS=CLS
+                )
+            decoded_features, _, _ = self.layer_former_2(
+                projected_features, depth, height, width, CLS=CLS
+            )
+            decoded_features = Rearrange('b d h w c -> b (d h w) c')(decoded_features)
 
             if self.is_last:
                 if self.recon_mode:
-                    tran_layer_2 = Rearrange('b (d h w) c -> b c d h w', b=b, h=h, w=w)(tran_layer_2)
-                out = self.layer_up(tran_layer_2)
+                    decoded_features = Rearrange(
+                        'b (d h w) c -> b c d h w',
+                        b=batch_size,
+                        h=height,
+                        w=width,
+                    )(decoded_features)
+                decoder_output = self.layer_up(decoded_features)
                 if not self.recon_mode:
-                    out = Rearrange('b d h w c -> b c d h w')(out)
-                out = self.last_layer(out)
+                    decoder_output = Rearrange('b d h w c -> b c d h w')(decoder_output)
+                decoder_output = self.last_layer(decoder_output)
             else:
-                out = self.layer_up(tran_layer_2)
+                decoder_output = self.layer_up(decoded_features)
 
-        return out
+        return decoder_output

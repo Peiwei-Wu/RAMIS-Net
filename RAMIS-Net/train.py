@@ -80,6 +80,23 @@ class PolyLR(lr_scheduler._LRScheduler):
         return [base_lr * (1 - self.last_epoch / self.max_epoch) ** self.power for base_lr in self.base_lrs]
 
 
+class RunningAverages:
+
+    def __init__(self):
+        self.totals = {}
+        self.counts = {}
+
+    def update(self, **values):
+        for metric_name, metric_value in values.items():
+            self.totals[metric_name] = self.totals.get(metric_name, 0.0) + metric_value
+            self.counts[metric_name] = self.counts.get(metric_name, 0) + 1
+
+    def mean(self, metric_name):
+        if metric_name not in self.totals:
+            raise KeyError(f"Metric '{metric_name}' has not been updated.")
+        return self.totals[metric_name] / self.counts[metric_name]
+
+
 def make_optimizer_double(model1, model2):
     optimizer = AdamW([
             {'params': model1.parameters()},
@@ -115,19 +132,8 @@ best_dice = 0.0
 for epoch in range(epoch_init, n_epochs):
     scheduler.step()
 
-    train_loss = 0.0
-    enc_loss_value = 0.0
-    cls_loss_value = 0.0
-    recon_loss_value = 0.0
-    dice_full_loss_value = 0.0
-    dice_missing_loss_value = 0.0
-    consistency_loss_value = 0.0
-
-    val_scores_full = 0.0
-    val_scores_miss = 0.0
-    val_loss_wt = 0.0
-    val_loss_et = 0.0
-    val_loss_ct = 0.0
+    train_metrics = RunningAverages()
+    val_metrics = RunningAverages()
 
     for phase in ['train', 'eval']:
         loader = loaders[phase]
@@ -142,58 +148,47 @@ for epoch in range(epoch_init, n_epochs):
                 batch_y = Rearrange('b c h w d -> b c d h w')(batch_y)
 
                 with torch.set_grad_enabled(phase == 'train'):
-                    output_full, enc_context_att_full, CLS_full, recon_full = model_full(batch_x[:, 0:])
+                    output_full, REC_full, MISA_token_full, recon_full = model_full(batch_x[:, 0:])
 
                     miss_modality = batch_x[:, 0:1, :, :, :]
-                    output_missing, enc_context_att_missing, CLS_missing, _ = model_missing(miss_modality)
+                    output_missing, REC_missing, MISA_token_missing, _ = model_missing(miss_modality)
 
-                    # MISA Loss
+                    # RARA module --- REC loss
                     if args.context_loss == 'L1':
-                        loss_context_att = (args.context_loss_l1_coef * L1_loss(enc_context_att_full[0],
-                                                                                enc_context_att_missing[0]) +
-                                            args.context_loss_l2_coef * L1_loss(enc_context_att_full[1],
-                                                                                enc_context_att_missing[1]) +
-                                            args.context_loss_l3_coef * L1_loss(enc_context_att_full[2],
-                                                                                enc_context_att_missing[2]) +
-                                            args.context_loss_l4_coef * L1_loss(enc_context_att_full[3],
-                                                                                enc_context_att_missing[3]))
+                        REC_loss = (
+                            args.context_loss_l1_coef * L1_loss(REC_full[0], REC_missing[0]) +
+                            args.context_loss_l2_coef * L1_loss(REC_full[1], REC_missing[1]) +
+                            args.context_loss_l3_coef * L1_loss(REC_full[2], REC_missing[2]) +
+                            args.context_loss_l4_coef * L1_loss(REC_full[3], REC_missing[3])
+                        )
                     else:
                         # Cosine similarity alignment
-                        enc_context_att_full[0] = enc_context_att_full[0].reshape(1, -1)
-                        loss_context_att = (
-                                    args.context_loss_l1_coef * loss_cosine(enc_context_att_full[0].reshape(1, -1),
-                                                                            enc_context_att_missing[0].reshape(1, -1),
-                                                                            torch.tensor([1]).to(device)) +
-                                    args.context_loss_l2_coef * loss_cosine(enc_context_att_full[1].reshape(1, -1),
-                                                                            enc_context_att_missing[1].reshape(1, -1),
-                                                                            torch.tensor([1]).to(device)) +
-                                    args.context_loss_l3_coef * loss_cosine(enc_context_att_full[2].reshape(1, -1),
-                                                                            enc_context_att_missing[2].reshape(1, -1),
-                                                                            torch.tensor([1]).to(device)) +
-                                    args.context_loss_l4_coef * loss_cosine(enc_context_att_full[3].reshape(1, -1),
-                                                                            enc_context_att_missing[3].reshape(1, -1),
-                                                                            torch.tensor([1]).to(device))
+                        REC_full[0] = REC_full[0].reshape(1, -1)
+                        REC_loss = (
+                            args.context_loss_l1_coef * loss_cosine(REC_full[0].reshape(1, -1), REC_missing[0].reshape(1, -1), torch.tensor([1]).to(device)) +
+                            args.context_loss_l2_coef * loss_cosine(REC_full[1].reshape(1, -1), REC_missing[1].reshape(1, -1), torch.tensor([1]).to(device)) +
+                            args.context_loss_l3_coef * loss_cosine(REC_full[2].reshape(1, -1), REC_missing[2].reshape(1, -1), torch.tensor([1]).to(device)) +
+                            args.context_loss_l4_coef * loss_cosine(REC_full[3].reshape(1, -1), REC_missing[3].reshape(1, -1), torch.tensor([1]).to(device))
                         )
 
-                    # Dice and consistency loss
-                    loss_dc, loss_miss_dc, consistency_loss = losses['co_loss'](output_full, output_missing, batch_y,
-                                                                                epoch)
-
-                    # Token loss
+                    # MISA module --- MISA token loss
                     if args.token_loss == 'L1':
-                        cls_token_loss = L1_loss(CLS_full, CLS_missing)
+                        cls_token_loss = L1_loss(MISA_token_full, MISA_token_missing)
                     else:
-                        cls_token_loss = L2_loss(CLS_full, CLS_missing)
+                        cls_token_loss = L2_loss(MISA_token_full, MISA_token_missing)
 
-                    # Reconstruction loss
+                    # Reconstruction module --- Reconstruction loss
                     if args.recon_loss == 'L1':
                         recon_loss = L1_loss(recon_full, batch_x[:, 0:])
+
+                    # Task level --- Dice loss * 2 and consistency loss * 1
+                    loss_dc, loss_miss_dc, consistency_loss = losses['co_loss'](output_full, output_missing, batch_y, epoch)
 
                     # Total loss
                     tot_loss = (args.weight_full_coef * loss_dc +
                                 args.weight_missing_coef * loss_miss_dc +
                                 args.consistency_coef * consistency_loss +
-                                args.context_loss_full_coef * loss_context_att +
+                                args.context_loss_full_coef * REC_loss +
                                 args.token_loss_coef * cls_token_loss +
                                 args.recon_loss_coef * recon_loss)
 
@@ -201,40 +196,51 @@ for epoch in range(epoch_init, n_epochs):
                         optimizer.zero_grad()
                         tot_loss.backward()
 
-                        train_loss += tot_loss.item()
-                        enc_loss_value += (args.context_loss_full_coef * loss_context_att.item())
-                        dice_full_loss_value += (args.weight_full_coef * loss_dc.item())
-                        dice_missing_loss_value += (args.weight_missing_coef * loss_miss_dc.item())
-                        consistency_loss_value += (args.consistency_coef * consistency_loss.item())
-                        cls_loss_value += (args.token_loss_coef * cls_token_loss.item())
-                        recon_loss_value += (args.recon_loss_coef * recon_loss.item())
+                        train_metrics.update(
+                            total_loss=tot_loss.item(),
+                            rara_loss=args.context_loss_full_coef * REC_loss.item(),
+                            full_segmentation_loss=args.weight_full_coef * loss_dc.item(),
+                            missing_segmentation_loss=args.weight_missing_coef * loss_miss_dc.item(),
+                            consistency_loss=args.consistency_coef * consistency_loss.item(),
+                            misa_loss=args.token_loss_coef * cls_token_loss.item(),
+                            reconstruction_loss=args.recon_loss_coef * recon_loss.item(),
+                        )
 
                 if phase == 'train':
                     optimizer.step()
                     if (batch_id + 1) % 20 == 0:
                         logging.info(
-                            f'Epoch: {epoch + 1}|| iteration: {batch_id + 1}|| Training loss: {(train_loss / (batch_id + 1)):.5f}|| Encoder loss: {(enc_loss_value / (batch_id + 1)):.7f}|| DSC loss full: {(dice_full_loss_value / (batch_id + 1)):.5f}|| DSC loss missing: {(dice_missing_loss_value / (batch_id + 1)):.5f}|| Consistency loss: {(consistency_loss_value / (batch_id + 1)):.5f}|| CLS loss: {(cls_loss_value / (batch_id + 1)):.6f}|| Recon loss: {(recon_loss_value / (batch_id + 1)):.7f}')
+                            f'Epoch: {epoch + 1}|| iteration: {batch_id + 1}'
+                            f'|| Training loss: {train_metrics.mean("total_loss"):.5f}'
+                            f'|| RARA loss: {train_metrics.mean("rara_loss"):.7f}'
+                            f'|| DSC loss full: {train_metrics.mean("full_segmentation_loss"):.5f}'
+                            f'|| DSC loss missing: {train_metrics.mean("missing_segmentation_loss"):.5f}'
+                            f'|| Consistency loss: {train_metrics.mean("consistency_loss"):.5f}'
+                            f'|| MISA loss: {train_metrics.mean("misa_loss"):.6f}'
+                            f'|| Recon loss: {train_metrics.mean("reconstruction_loss"):.7f}')
                 else:
-                    val_scores_full_t, val_loss_full_wt, val_loss_full_et, val_loss_full_ct = measure_dice_score(
-                        output_full, batch_y)
-                    val_scores_miss_t, val_loss_missing_wt_t, val_loss_missing_et_t, val_loss_missing_ct_t = measure_dice_score(
-                        output_missing, batch_y)
+                    val_scores_full_t, val_loss_full_wt, val_loss_full_et, val_loss_full_ct = measure_dice_score(output_full, batch_y)
+                    val_scores_miss_t, val_loss_missing_wt_t, val_loss_missing_et_t, val_loss_missing_ct_t = measure_dice_score(output_missing, batch_y)
 
-                    val_scores_full += val_scores_full_t
-                    val_scores_miss += val_scores_miss_t
-                    val_loss_wt += val_loss_missing_wt_t
-                    val_loss_et += val_loss_missing_et_t
-                    val_loss_ct += val_loss_missing_ct_t
+                    val_metrics.update(
+                        dice_full=val_scores_full_t,
+                        dice_missing=val_scores_miss_t,
+                        dice_wt=val_loss_missing_wt_t,
+                        dice_et=val_loss_missing_et_t,
+                        dice_tc=val_loss_missing_ct_t,
+                    )
 
             if phase == 'train':
-                logging.info(f'### Epoch {epoch + 1} overall training loss>> {train_loss / (batch_id + 1)}')
+                logging.info(
+                    f'### Epoch {epoch + 1} overall training loss>> '
+                    f'{train_metrics.mean("total_loss")}')
 
             elif phase == 'eval':
-                dice_full = (val_scores_full / (batch_id + 1))
-                dice_missing = (val_scores_miss / (batch_id + 1))
-                dice_wt = (val_loss_wt / (batch_id + 1))
-                dice_et = (val_loss_et / (batch_id + 1))
-                dice_ct = (val_loss_ct / (batch_id + 1))
+                dice_full = val_metrics.mean('dice_full')
+                dice_missing = val_metrics.mean('dice_missing')
+                dice_wt = val_metrics.mean('dice_wt')
+                dice_et = val_metrics.mean('dice_et')
+                dice_ct = val_metrics.mean('dice_tc')
 
                 # Save model
                 state = {}
@@ -251,4 +257,3 @@ for epoch in range(epoch_init, n_epochs):
                 logging.info(f'### Best Val DSC missing >> {best_dice}')
                 logging.info(
                     f'### Epoch {epoch + 1}, Val DSC full: {dice_full}, Val DSC missing: {dice_missing}, WT: {dice_wt}, CT: {dice_ct}, ET: {dice_et}')
-
