@@ -17,7 +17,7 @@
 
 ## 📷 Overview
 
-![image-20260806183719326](C:\Users\35575\AppData\Roaming\Typora\typora-user-images\image-20260806183719326.png)
+<img width="2014" height="1249" alt="image" src="https://github.com/user-attachments/assets/f57f4590-920a-46c7-a5a8-9ddc0a284636" />
 
 ---
 
@@ -71,7 +71,7 @@ python train.py \
     --n_epochs 300 \
     --batch_size_tr 1 \
     --batch_size_va 1 \
-    --lr 0.00025
+    --lr 0.0003
 ```
 
 ### Configuration
@@ -81,12 +81,12 @@ All training arguments are defined in `configs/args.py`. Key parameters:
 | Parameter | Description | Default |
 |-----------|-------------|---------|
 | `--task_name` | Project name | `RAMIS-Net` |
-| `--datasets` | Dataset type – `'BRATS 2018'` or `'BRATS 2020'` | – |
+| `--datasets` | Dataset type – `'BRATS 2018'` or `'BRATS 2020'` | `'BRATS 2020'` |
 | `--path_to_data` | Path to dataset directory | – |
 | `--n_epochs` | Number of training epochs | `300` |
-| `--batch_size_tr` | Training batch size | – |
-| `--batch_size_va` | Validation batch size | – |
-| `--lr` | Learning rate | `0.00025` |
+| `--batch_size_tr` | Training batch size | `1` |
+| `--batch_size_va` | Validation batch size | `1` |
+| `--lr` | Learning rate | `0.0003` |
 | `--modalities` | Input modalities | `flair t1 t1ce t2` |
 
 ### Evaluation
@@ -157,4 +157,4 @@ For issues and questions, please refer to the project documentation or contact t
 ---
 
 **Last Updated**: July 2026  
-**Version**: 1.0
+**Version**: 1.2
